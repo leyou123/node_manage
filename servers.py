@@ -6,6 +6,8 @@ from zero_ssl import Certificates
 from check_all_server import Servers
 import time
 import random
+import requests
+import json
 
 domain = "https://nodes.9527.click"
 
@@ -29,6 +31,8 @@ class ServerManager(object):
         self.complete_ssl = 5
         self.succeed = 6
         self.clear_ssl = 7
+        self.test_node = 9
+        self.apply_failed = 10
 
     def start_operator(self):
         info = {
@@ -45,12 +49,38 @@ class ServerManager(object):
             snapshot = data.get("snapshot", "")
             region = data.get("region_id", "")
             id = data.get("id", "")
+            old_instance_id = data.get("old_instance_id", "")
             print(f"{name}正在创建服务器")
 
 
             if operator == "Vultr":
                 create_datas = create_instance(region, config, name, snapshot)
                 if not create_datas:
+                    continue
+                continue_flag = False
+                server_data = get_instance(create_datas.get("id", ""))
+                status = self.get_instance_status(server_data.get("main_ip", ""))
+                if not status:
+                    continue_flag = True
+                else:
+                    pass
+                    # # 重试申请5次，如果还是重复申请 修改状态为 5次黑名单
+                    # for i in range(5):
+                    #     create_datas = create_instance(region, config, name, snapshot)
+                    #     if not create_datas:
+                    #         continue
+                    #     server_data = get_instance(create_datas.get("id", ""))
+                    #     status = self.get_instance_status(server_data.get("main_ip", ""))
+                    #     if not status:
+                    #         continue_flag = True
+                    #         break
+                    # if not continue_flag:
+                    #     # ins_url = f"{domain}/node/instanceDel"
+                    #     ins_url = f"http://54.177.55.54:7000/node/instanceDel"
+                    #     params = {'old_instance_id': old_instance_id}
+                    #     response = requests.put(url, params)
+
+                if not continue_flag:
                     continue
                 url = f"{domain}/node/upload_config"
                 instance_data = {
@@ -96,11 +126,18 @@ class ServerManager(object):
 
                 # 删除旧服务器
                 old_instance_id = data.get("old_instance_id", "")
+                old_server_data = get_instance(old_instance_id)
                 response = delete_server(old_instance_id)
                 if response:
                     clear_url = f"{domain}/node/del_servers"
                     json_data = {"instance_id": old_instance_id}
                     send_data(clear_url, json_data)
+                    # 记录已删除实例
+                    if old_server_data:
+                        delete_url = f"{domain}/node/instanceDel"
+                        # delete_url = f"http://54.177.55.54:7000/node/instanceDel"
+                        json_data = {"instance_id": old_instance_id, "ip":old_server_data.get("main_ip", "")}
+                        send_data(delete_url, json_data)
 
                 print(f"{name}服务器检测成功")
 
@@ -116,8 +153,11 @@ class ServerManager(object):
                 # if not server_data:
                 #     clear_servers_data(instance_id)
                 #     continue
-                ip = server_data.get("main_ip", "")
-                if ip == "0.0.0.0":
+                # ip = server_data.get("main_ip", "")
+                # if ip == "0.0.0.0":
+                #     continue
+                ip = data.get("ip", "")
+                if not ip:
                     continue
                 servers = TestServer.exec_cmd(ip)
                 if not servers:
@@ -199,6 +239,7 @@ class ServerManager(object):
             server_cert_id = data.get("cert_id", "")
             cname_validation_p1 = data.get("cname_validation_p1", "")
             cname_validation_p2 = data.get("cname_validation_p2", "")
+            test_node = data.get("test_node", 0)
 
             if not check_do_main:
                 continue
@@ -212,6 +253,7 @@ class ServerManager(object):
             print(f"{check_do_main}解析域正确")
             # 创建SSL证书
 
+            run_status = self.complete_ssl
             if server_cert_id:
                 cret_data = Certificates.get_info(server_cert_id)
                 print("==================================================")
@@ -223,9 +265,15 @@ class ServerManager(object):
                     print(f"{check_do_main}验证域名成功")
                     # 修改状态
                     url = f"{domain}/node/upload_config"
+                    # url = f"http://54.177.55.54:7000/node/upload_config"
+                    # 判断是否是测试节点
+                    if test_node:
+                        run_status = self.test_node
+                    else:
+                        run_status = self.complete_ssl
                     instance_data = {
                         "id": id,
-                        "run_status": self.complete_ssl
+                        "run_status": run_status
                     }
                     send_data(url, instance_data)
                     print(f"{check_do_main}创建证书成功")
@@ -237,10 +285,16 @@ class ServerManager(object):
                 cname_validation_p2 = cert_data.get("cname_validation_p2", "")
 
                 url = f"{domain}/node/upload_config"
+                # url = f"http://54.177.55.54:7000/node/upload_config"
+                # 判断是否是测试节点
+                if test_node:
+                    run_status = self.test_node
+                else:
+                    run_status = self.complete_ssl
                 instance_data = {
                     "id": id,
                     "cert_id": server_cert_id,
-                    "run_status": self.complete_ssl,
+                    "run_status": run_status,
                     "cname_validation_p1": cname_validation_p1.lower(),
                     "cname_validation_p2": cname_validation_p2.lower()
                 }
@@ -315,7 +369,7 @@ class ServerManager(object):
             cert_id = data.get("cert_id")
             my_domain = data.get("domain")
             print("开始上传文件")
-
+            print(data)
             upload_res = self.upload_file(ip, cert_id, my_domain)
             if upload_res is False:
                 continue
@@ -378,12 +432,68 @@ class ServerManager(object):
         # os.system(del_cmd)
         return True
 
+    def verification_node(self):
+        """
+            验证节点是否可用
+        """
+        info = {
+            "run_status": self.test_node
+        }
+        datas = get_config(info)
+        if not datas:
+            return False
+        print("开始验证节点")
+        for data in datas:
+            id = data.get("id", "")
+            test_status = data.get("test_status", 0)
+            if not test_status:
+                continue
+            """
+                (0, "不可用"),
+                (1, "测试通过"),
+                (2, "测试失败"),
+            """
+            # 判断节点测试是否通过
+            if test_status == 1:
+                url = f"{domain}/node/upload_config"
+                # url = f"http://54.177.55.54:7000/node/upload_config"
+                instance_data = {
+                    "id": id,
+                    "run_status": self.complete_ssl
+                }
+                send_data(url, instance_data)
+            elif test_status == 2:
+                # 清空数据，重新申请ip
+                url = f"{domain}/node/clear_nodeconfig"
+                # url = f"http://54.177.55.54:7000/node/clear_nodeconfig"
+                instance_data = {
+                    "id": id
+                }
+                send_data(url, instance_data)
+
+
+    def get_instance_status(self, main_ip):
+        delete_url = f"{domain}/node/instanceDel"
+        # delete_url = f"http://54.177.55.54:7000/node/instanceDel"
+        params = {
+            'ip': main_ip
+        }
+        response = requests.get(delete_url, params)
+        if response.status_code == 200:
+            instance_data = json.loads(response.text)
+            return instance_data.get("status")
+        else:
+            return False
+
+
+
     def start(self):
         self.start_operator()
         self.check_instance_status()
         self.set_domain()
         self.create_ssl()
         self.start_servers()
+        self.verification_node()
 
 
 if __name__ == '__main__':
@@ -397,3 +507,4 @@ if __name__ == '__main__':
         except Exception as e:
             print(e)
         time.sleep(60*2)
+        # time.sleep(15)

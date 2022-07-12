@@ -6,6 +6,7 @@ import requests
 from dingding import DataLoggerAPI
 
 domain = "https://nodes.9527.click"
+# domain = "http://54.177.55.54:7000"
 password = "Leyou2020"
 username = "root"
 port = 22

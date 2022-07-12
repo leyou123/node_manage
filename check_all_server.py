@@ -50,16 +50,27 @@ class Servers(object):
         # print(total_flow,already_flow,res)
         if res > max_flow:
             return True
-        elif str(tag) == "-999":
-            return True
+        # elif str(tag) == "-999":
+        #     return True
         else:
             return False
 
     def delete_node(self, instance_id):
-
+        # url = f"http://54.177.55.54:7000/node/Node_close"
         url = f"{base_url}/node/Node_close"
         data = {
             "instance_id": instance_id
+        }
+        res = requests.post(url=url, json=data)
+        # print(res.status_code)
+        # print(res.text)
+
+    def update_node(self, node_id):
+        # url = f"http://54.177.55.54:7000/node/Node_update"
+        url = f"{base_url}/node/Node_update"
+        data = {
+            "node_id": node_id,
+            "type": "update"
         }
         res = requests.post(url=url, json=data)
         print(res.status_code)
@@ -78,13 +89,16 @@ class Servers(object):
             tag = data.get("tag", 0)
             name = data.get("name", "")
             host = data.get("host", "")
-            print("tag", tag)
+            node_id = data.get("id", "")
             check_reulst = self.check_flow(total_flow, already_flow, tag)
 
             if check_reulst:
                 print(f"{host}流量超过95%")
-                self.delete_node(instance_id)
+                # self.delete_node(instance_id)
+                self.update_node(node_id)
                 continue
+            if str(tag) == "-999":
+                self.delete_node(instance_id)
 
             instance_id = data.get("instance_id", "")
             ip = data.get("ip", "")
