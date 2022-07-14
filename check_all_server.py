@@ -1,3 +1,5 @@
+from core import send_data
+from vultr import delete_server
 import time
 import json
 import requests
@@ -38,12 +40,12 @@ class Servers(object):
 
     def check_flow(self, total_flow, already_flow, tag):
         """
-        判断流量是否超过了 95%
+        判断流量是否超过了 98%
         :param total_flow:
         :param already_flow:
         :return:
         """
-        max_flow = 0.95
+        max_flow = 0.98
         if not total_flow or not already_flow:
             return False
         res = round(float(already_flow) / float(total_flow), 2)
@@ -55,32 +57,23 @@ class Servers(object):
         else:
             return False
 
-    def delete_node(self, instance_id):
+    def delete_node(self, instance_id, message=""):
         # url = f"http://54.177.55.54:7000/node/Node_close"
         url = f"{base_url}/node/Node_close"
         data = {
-            "instance_id": instance_id
+            "instance_id": instance_id,
+            "message": message
         }
         res = requests.post(url=url, json=data)
         # print(res.status_code)
         # print(res.text)
 
-    def update_node(self, node_id):
-        # url = f"http://54.177.55.54:7000/node/Node_update"
-        url = f"{base_url}/node/Node_update"
-        data = {
-            "node_id": node_id,
-            "type": "update"
-        }
-        res = requests.post(url=url, json=data)
-        print(res.status_code)
-        print(res.text)
 
     def clear_data(self):
         node_datas = self.get_node_all()
         max_number = 3
         datas = node_datas.get("nodes", "")
-        dingding_api = DataLoggerAPI("6543720081", "1mtv8ux938ykgw030vi2tuc3yc201ikr")
+        # dingding_api = DataLoggerAPI("6543720081", "1mtv8ux938ykgw030vi2tuc3yc201ikr")
 
         for data in datas:
             instance_id = data.get("instance_id", "")
@@ -93,12 +86,21 @@ class Servers(object):
             check_reulst = self.check_flow(total_flow, already_flow, tag)
 
             if check_reulst:
-                print(f"{host}流量超过95%")
-                # self.delete_node(instance_id)
-                self.update_node(node_id)
+                print(f"{host}流量超过98%")
+
+                # 删除运营商实例
+                response = delete_server(instance_id)
+                # 删除trojan node 和 node config
+                self.delete_node(instance_id, "使用流量超过98%")
+                # 清空node config 的 old_instance_id 值
+                if response:
+                    clear_url = f"{base_url}/node/del_servers"
+                    json_data = {"instance_id": instance_id}
+                    send_data(clear_url, json_data)
                 continue
             if str(tag) == "-999":
                 self.delete_node(instance_id)
+                continue
 
             instance_id = data.get("instance_id", "")
             ip = data.get("ip", "")
