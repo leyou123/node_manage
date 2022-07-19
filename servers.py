@@ -34,6 +34,8 @@ class ServerManager(object):
         self.test_node = 9
         self.apply_failed = 10
 
+        self.black_count = 0
+
     def start_operator(self):
         info = {
             "run_status": self.stop
@@ -56,31 +58,6 @@ class ServerManager(object):
             if operator == "Vultr":
                 create_datas = create_instance(region, config, name, snapshot)
                 if not create_datas:
-                    continue
-                continue_flag = False
-                server_data = get_instance(create_datas.get("id", ""))
-                status = self.get_instance_status(server_data.get("main_ip", ""))
-                if not status:
-                    continue_flag = True
-                else:
-                    pass
-                    # # 重试申请5次，如果还是重复申请 修改状态为 5次黑名单
-                    # for i in range(5):
-                    #     create_datas = create_instance(region, config, name, snapshot)
-                    #     if not create_datas:
-                    #         continue
-                    #     server_data = get_instance(create_datas.get("id", ""))
-                    #     status = self.get_instance_status(server_data.get("main_ip", ""))
-                    #     if not status:
-                    #         continue_flag = True
-                    #         break
-                    # if not continue_flag:
-                    #     # ins_url = f"{domain}/node/instanceDel"
-                    #     ins_url = f"http://54.177.55.54:7000/node/instanceDel"
-                    #     params = {'old_instance_id': old_instance_id}
-                    #     response = requests.put(url, params)
-
-                if not continue_flag:
                     continue
                 url = f"{domain}/node/upload_config"
                 instance_data = {
@@ -116,13 +93,14 @@ class ServerManager(object):
                 if not servers:
                     continue
 
-                url = f"{domain}/node/upload_config"
-                instance_data = {
-                    "id": id,
-                    "ip": ip,
-                    "run_status": self.available,
-                }
-                send_data(url, instance_data)
+
+                # url = f"{domain}/node/upload_config"
+                # instance_data = {
+                #     "id": id,
+                #     "ip": ip,
+                #     "run_status": self.available,
+                # }
+                # send_data(url, instance_data)
 
                 # 删除旧服务器
                 old_instance_id = data.get("old_instance_id", "")
@@ -132,13 +110,39 @@ class ServerManager(object):
                     clear_url = f"{domain}/node/del_servers"
                     json_data = {"instance_id": old_instance_id}
                     send_data(clear_url, json_data)
-                    # 记录已删除实例
-                    if old_server_data:
-                        delete_url = f"{domain}/node/instanceDel"
-                        # delete_url = f"http://54.177.55.54:7000/node/instanceDel"
-                        json_data = {"instance_id": old_instance_id, "ip":old_server_data.get("main_ip", "")}
-                        send_data(delete_url, json_data)
-
+                # 记录已删除实例
+                if old_server_data:
+                    delete_url = f"{domain}/node/instanceDel"
+                    # delete_url = f"http://54.177.55.54:7000/node/instanceDel"
+                    json_data = {"instance_id": old_instance_id, "ip":old_server_data.get("main_ip", "")}
+                    send_data(delete_url, json_data)
+                # 检测此ip是否在黑名单中，如果在黑名单中则重新申请，不在则继续以下流程, 如果重复申请5此还是在黑名单则放弃申请
+                status = self.get_instance_status(ip)
+                if status:
+                    url = f"{domain}/node/Node_close"
+                    data = {
+                        "instance_id": instance_id,
+                        "message": ""
+                    }
+                    send_data(url, data)
+                    self.black_count += 1
+                    # continue
+                else:
+                    self.black_count = 0
+                    url = f"{domain}/node/upload_config"
+                    instance_data = {
+                        "id": id,
+                        "ip": ip,
+                        "run_status": self.available,
+                    }
+                    send_data(url, instance_data)
+                if self.black_count >= 5:
+                    delete_url = f"{domain}/node/instanceDel"
+                    # delete_url = f"http://54.177.55.54:7000/node/instanceDel"
+                    params = {
+                        'old_instance_id': old_instance_id
+                    }
+                    response = requests.put(delete_url, params)
                 print(f"{name}服务器检测成功")
 
                 # test_data = check_servers(ip)
@@ -507,4 +511,4 @@ if __name__ == '__main__':
         except Exception as e:
             print(e)
         time.sleep(60*2)
-        # time.sleep(15)
+        # time.sleep(60)
